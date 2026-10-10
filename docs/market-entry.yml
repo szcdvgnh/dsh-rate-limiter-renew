@@ -1,0 +1,6 @@
+url: https://github.com/szcdvgnh/dsh-rate-limiter-renew
+name: szcdvgnh/dsh-rate-limiter-renew
+category: model
+description:
+  en: 'Rate-limits LLM requests per provider and per model with reservation token buckets (queue or reject), upstream-429 cool-down, gateway identity rewriting, and automatic detection of the providers and models the profile actually declares.'
+  zh: '按供应商与模型粒度限速 LLM 请求：预约式令牌桶支持排队或拒绝，上游 429 自动退避，网关身份规则可改写 User-Agent 与注入请求头，并自动侦测配置文件中实际拥有的供应商与模型。'

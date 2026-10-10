@@ -1,0 +1,41 @@
+# dsh-rate-limiter-renew — bundle patch.
+#
+# The row id below is also this plugin's settings namespace: the Host exposes the
+# entry's config at `settings.describe()` under ns `rate-limiter-renew`, and the
+# client half mounts its configuration page into `plugins.row.config` with the key
+# `dsh-rate-limiter-renew#rate-limiter-renew`.
+#
+# Every value in `config` is optional — the defaults live in the schemastery
+# `Config` schema exported by lib/index.js, and are editable at runtime from
+#   Sidebar → Plugins → Installed → dsh-rate-limiter-renew → row config page
+# which writes back into this profile's cordis.patch.yml.
+- insert:
+    - id: rate-limiter-renew
+      name: dsh-rate-limiter-renew
+      inject: [llm]
+      config:
+        enabled: true
+        # requestsPerMinute: 20   # 0 = unlimited
+        # burst: 4
+        # mode: wait              # wait | reject
+        # maxWaitMs: 30000
+        # upstream429Backoff: true
+        # backoffMs: 30000
+        # maxBackoffMs: 60000
+        # backoffJitter: 0        # 0..1
+        # maxConcurrentRequests: 0
+        # autoDetectModels: true
+        # detectIntervalMs: 60000 # 0 = only on demand / on topology change
+        # models:
+        #   - provider: nvidia
+        #     model: ""
+        #     requestsPerMinute: 8
+        #     burst: 2
+        # identityRules:
+        #   - urlPattern: opencode.ai/zen
+        #     userAgent: opencode/1.18.25 ai-sdk/provider-utils/4.0.38 runtime/bun/1.3.14
+        #     dynamicIds: true
+        #     enabled: true
+        #     headers:
+        #       - name: x-custom
+        #         value: hello

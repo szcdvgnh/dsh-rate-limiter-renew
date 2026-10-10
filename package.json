@@ -1,0 +1,73 @@
+{
+  "name": "dsh-rate-limiter-renew",
+  "version": "1.0.0",
+  "description": "Per-(provider, model) rate limiting for DeepSeek Harness 0.2.x: reservation token buckets, wait/reject modes, upstream 429 back-off, gateway identity rewriting and automatic provider/model detection.",
+  "author": "szcdvgnh",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/szcdvgnh/dsh-rate-limiter-renew.git"
+  },
+  "homepage": "https://github.com/szcdvgnh/dsh-rate-limiter-renew#readme",
+  "bugs": {
+    "url": "https://github.com/szcdvgnh/dsh-rate-limiter-renew/issues"
+  },
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/core.js",
+    "lib/client.js",
+    "cordis.patch.yml",
+    "README.md",
+    "README.zh-CN.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "node --test --test-isolation=none --import ./test/harness/register.mjs test/core.test.mjs test/host.test.mjs test/client.test.mjs",
+    "test:core": "node --test --test-isolation=none test/core.test.mjs",
+    "check": "node --check lib/core.js && node --check lib/index.js && node --check lib/client.js"
+  },
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "cordis",
+    "rate-limit",
+    "token-bucket",
+    "llm",
+    "opencode"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@deepseek-ai/schemastery": "^3.18.4"
+  },
+  "dsh": {
+    "engines": {
+      "dsh": ">=0.2.0-0"
+    },
+    "compatibility": {
+      "dshReleases": [
+        "0.2.0-rc.0",
+        "0.2.0-rc.1",
+        "0.2.0-rc.2",
+        "0.2.0"
+      ]
+    },
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-plugin-manager",
+        "@deepseek-ai/dsh-client-ui-renderer"
+      ]
+    }
+  }
+}
