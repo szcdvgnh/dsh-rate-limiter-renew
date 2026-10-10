@@ -87,6 +87,25 @@ test("client: the bundle registers itself under its own id and exports apply/inj
   assert.ok(delivered.DICT && delivered.DICT.zh && delivered.DICT.en, "both dictionaries must ship");
 });
 
+test("client: the limit-scope control is translated in both dictionaries", async () => {
+  const { delivered } = await loadBundle();
+  const { zh, en } = delivered.DICT;
+
+  const keys = ["scope", "scopeHint", "scopeAll", "scopeOverrides", "scopeOff", "scopeOffNote", "scopeOverridesNote"];
+  for (const key of keys) {
+    assert.equal(typeof zh[key], "string", `zh.${key} is missing`);
+    assert.equal(typeof en[key], "string", `en.${key} is missing`);
+  }
+
+  // The three presented choices must be three distinct labels, not two labels
+  // and a repeat.
+  assert.equal(new Set([zh.scopeAll, zh.scopeOverrides, zh.scopeOff]).size, 3);
+  assert.equal(new Set([en.scopeAll, en.scopeOverrides, en.scopeOff]).size, 3);
+
+  // Both dictionaries must stay in lockstep, in both directions.
+  assert.deepEqual(Object.keys(zh).sort(), Object.keys(en).sort());
+});
+
 test("client: apply() mounts the row-config page and the composer line", async () => {
   const { delivered } = await loadBundle();
 

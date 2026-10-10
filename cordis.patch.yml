@@ -15,6 +15,7 @@
       inject: [llm]
       config:
         enabled: true
+        # scope: all              # all | overrides (off = enabled: false)
         # requestsPerMinute: 20   # 0 = unlimited
         # burst: 4
         # mode: wait              # wait | reject

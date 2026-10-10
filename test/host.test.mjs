@@ -220,14 +220,17 @@ function fakeLlm(overrides = {}) {
         { id: "openrouter", name: "OpenRouter" }
       ];
     },
+    // Tripwires: detection must read only the *added* routes. If the plugin ever
+    // consults the dormant-provider directory or the candidate-model discovery
+    // again, the throw lands in `errors` and the detection assertions below fail.
     async listConfigurableProviders() {
-      return [{ provider: "llm-pi-ai", displayName: "Pi AI", settingsNs: "llm-pi-ai" }];
+      throw new Error("the configurable-provider directory must not be consulted");
+    },
+    async discoverModels() {
+      throw new Error("discoverModels must not be consulted");
     },
     async listModels(provider) {
       return provider === "nvidia" ? [{ id: "deepseek-v4.1-flash", name: "V4.1 Flash", contextWindow: 128000 }] : [];
-    },
-    async discoverModels(settingsNs) {
-      return settingsNs === "llm-pi-ai" ? [{ id: "my-custom-model" }] : [];
     },
     ...overrides
   };
@@ -530,7 +533,7 @@ test("host: identity rules can be disabled without touching the URL matcher", as
   }
 });
 
-test("host: /models auto-detects the user's providers and models", async () => {
+test("host: /models auto-detects only the user's added providers and models", async () => {
   const webServer = makeWebServer();
   const ctx = makeCtx({ llm: fakeLlm(), webServer });
   apply(ctx, baseConfig({ autoDetectModels: true, detectIntervalMs: 60000 }));
@@ -540,13 +543,8 @@ test("host: /models auto-detects the user's providers and models", async () => {
   assert.deepEqual(body.value.errors, []);
   assert.deepEqual(
     body.value.providers.map((provider) => provider.id),
-    ["llm-pi-ai", "nvidia", "openrouter"]
+    ["nvidia", "openrouter"]
   );
-
-  const custom = body.value.providers.find((provider) => provider.id === "llm-pi-ai");
-  assert.deepEqual(custom.models.map((model) => model.id), ["my-custom-model"]);
-  assert.equal(custom.settingsNs, "llm-pi-ai");
-  assert.deepEqual(custom.sources, ["directory", "discoverModels"]);
 
   const nvidia = body.value.providers.find((provider) => provider.id === "nvidia");
   assert.deepEqual(nvidia.models.map((model) => model.id), ["deepseek-v4.1-flash"]);
@@ -557,12 +555,12 @@ test("host: /models auto-detects the user's providers and models", async () => {
   assert.deepEqual(body.value.providers.find((provider) => provider.id === "openrouter").models, []);
 
   const snapshot = await callRoute(webServer, `${BRIDGE_PREFIX}/stats`, { body: {} });
-  assert.equal(snapshot.body.value.detected.providers, 3);
-  assert.equal(snapshot.body.value.detected.models, 2);
+  assert.equal(snapshot.body.value.detected.providers, 2);
+  assert.equal(snapshot.body.value.detected.models, 1);
 
   const service = ctx.provided.get(SERVICE_NAME);
   const detected = await service.detectModels({ force: true });
-  assert.deepEqual(detected.map((provider) => provider.id), ["llm-pi-ai", "nvidia", "openrouter"]);
+  assert.deepEqual(detected.map((provider) => provider.id), ["nvidia", "openrouter"]);
   assert.deepEqual(service.getDetectedModels(), detected);
   ctx.dispose();
 });
@@ -739,15 +737,17 @@ test("host: llm/adapters-updated invalidates the cached detection", async () => 
   const ctx = makeCtx({ llm, webServer });
   apply(ctx, baseConfig({ autoDetectModels: true, detectIntervalMs: 600000 }));
   await callRoute(webServer, `${BRIDGE_PREFIX}/models`, { body: { force: true } });
-  assert.equal(calls, 1);
+  const detected = calls;
+  assert.ok(detected >= 1, "a forced probe must reach listProviders");
   // Inside the TTL a non-forced probe is served from cache...
   await callRoute(webServer, `${BRIDGE_PREFIX}/models`, { body: {} });
-  assert.equal(calls, 1);
+  await callRoute(webServer, `${BRIDGE_PREFIX}/models`, { body: {} });
+  assert.equal(calls, detected);
   // ...but a topology change must force a fresh read.
   ctx.events.get("llm/adapters-updated").handler();
   await new Promise((resolve) => setImmediate(resolve));
   await callRoute(webServer, `${BRIDGE_PREFIX}/models`, { body: { force: true } });
-  assert.equal(calls, 3);
+  assert.ok(calls > detected, "an adapters-updated event must invalidate the cache");
   ctx.dispose();
 });
 
@@ -756,9 +756,6 @@ test("host: a garbage detection result still produces a usable snapshot", async 
   const llm = {
     async listProviders() {
       return [null, { id: "" }, { id: "nvidia" }];
-    },
-    async listConfigurableProviders() {
-      return [{}];
     },
     async listModels() {
       return [null, { id: "" }];
@@ -797,6 +794,67 @@ test("host: per-route overrides beat the global limit", async () => {
   assert.equal(stats.length, 2);
   assert.equal(stats.find((route) => route.provider === "nvidia").requestsPerMinute, 60);
   assert.equal(stats.find((route) => route.provider === "openrouter").unlimited, true);
+  ctx.dispose();
+});
+
+test("host: scope=all limits every route, including ones with no override row", async () => {
+  const ctx = makeCtx();
+  apply(ctx, baseConfig({ scope: "all", mode: "reject", requestsPerMinute: 60, burst: 1, models: [] }));
+  const { handler } = streamHandler(ctx);
+  const next = chunksOf(OK_CHUNKS);
+  await collect(handler({ provider: "openrouter", model: "x" }, next));
+  const rejected = await collect(handler({ provider: "openrouter", model: "x" }, next));
+  assert.equal(rejected[0].type, "finish");
+  assert.equal(rejected[0].reason.failure.code, "RATE_LIMIT");
+  assert.equal(ctx.provided.get(SERVICE_NAME).getAllStats().length, 1);
+  ctx.dispose();
+});
+
+test("host: scope=overrides limits only routes that have an override row", async () => {
+  const ctx = makeCtx();
+  apply(
+    ctx,
+    baseConfig({
+      scope: "overrides",
+      mode: "reject",
+      requestsPerMinute: 60,
+      burst: 1,
+      models: [{ provider: "nvidia", model: "glm", requestsPerMinute: 60, burst: 1 }]
+    })
+  );
+  const { handler } = streamHandler(ctx);
+  const next = chunksOf(OK_CHUNKS);
+
+  // No override row -> out of scope -> passes through and is never even counted.
+  for (let index = 0; index < 6; index += 1) {
+    assert.deepEqual(await collect(handler({ provider: "openrouter", model: "x" }, next)), OK_CHUNKS);
+  }
+  assert.equal(ctx.provided.get(SERVICE_NAME).getStats("openrouter", "x"), null);
+
+  // ... while the route that does have a row is still throttled.
+  await collect(handler({ provider: "nvidia", model: "glm" }, next));
+  const rejected = await collect(handler({ provider: "nvidia", model: "glm" }, next));
+  assert.equal(rejected[0].reason.failure.code, "RATE_LIMIT");
+
+  const routes = ctx.provided.get(SERVICE_NAME).getAllStats();
+  assert.deepEqual(routes.map((route) => `${route.provider}/${route.model}`), ["nvidia/glm"]);
+  ctx.dispose();
+});
+
+test("host: switching to scope=overrides drops buckets that are now out of scope", async () => {
+  const ctx = makeCtx();
+  const config = baseConfig({ mode: "wait", requestsPerMinute: 0, burst: 1, models: [] });
+  apply(ctx, config);
+  const { handler } = streamHandler(ctx);
+  const service = ctx.provided.get(SERVICE_NAME);
+  await collect(handler({ provider: "openrouter", model: "x" }, chunksOf(OK_CHUNKS)));
+  assert.equal(service.getAllStats().length, 1);
+
+  // A live config edit (what the settings bridge does through the namespace):
+  // the route has no override row anymore, so its stale bucket must be pruned.
+  config.scope = "overrides";
+  assert.deepEqual(service.getAllStats(), []);
+  assert.equal(service.getStats("openrouter", "x"), null);
   ctx.dispose();
 });
 

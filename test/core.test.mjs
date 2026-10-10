@@ -21,6 +21,7 @@ import {
   rateLimitFailure,
   releaseConcurrencySlot,
   resolveConfig,
+  routeLimits,
   ulid,
   validateOps,
   DEFAULT_CONFIG
@@ -203,6 +204,12 @@ test("normalizeConfig: rpm 0 stays unlimited, negatives and junk fall back", () 
   assert.equal(normalizeConfig({ backoffJitter: 5 }).backoffJitter, 1);
   assert.equal(normalizeConfig({ backoffJitter: -5 }).backoffJitter, 0);
   assert.equal(normalizeConfig({ enabled: false }).enabled, false);
+  assert.equal(DEFAULT_CONFIG.scope, "all");
+  assert.equal(normalizeConfig({}).scope, "all");
+  assert.equal(normalizeConfig({ scope: "overrides" }).scope, "overrides");
+  // There is no "off" scope: turning the limiter off is `enabled: false`.
+  assert.equal(normalizeConfig({ scope: "off" }).scope, "all");
+  assert.equal(normalizeConfig({ scope: "nonsense" }).scope, "all");
   assert.equal(normalizeConfig({ maxConcurrentRequests: 2.7 }).maxConcurrentRequests, 2);
   assert.equal(normalizeConfig({ maxWaitMs: -1 }).maxWaitMs, 0);
   assert.deepEqual(normalizeConfig({}).models, []);
@@ -243,8 +250,34 @@ test("limitFor: exact wins, then provider-wide, then global, then substring", ()
   assert.equal(limitFor(fuzzy, "other", "glm"), null);
 });
 
-/* ------------------------------- backoff ----------------------------- */
+test("routeLimits: scope \"overrides\" leaves unmatched routes unlimited", () => {
+  const rows = [{ provider: "nvidia", model: "glm", requestsPerMinute: 30, burst: 3 }];
+  const all = normalizeConfig({ scope: "all", requestsPerMinute: 12, burst: 2, models: rows });
+  const overrides = normalizeConfig({ scope: "overrides", requestsPerMinute: 12, burst: 2, models: rows });
 
+  // "all" limits everything; an override row still wins where it matches.
+  assert.deepEqual(routeLimits(all, "nvidia", "glm"), { capacity: 3, perMinute: 30, perSecond: 0.5 });
+  assert.deepEqual(routeLimits(all, "openrouter", "x"), { capacity: 2, perMinute: 12, perSecond: 0.2 });
+
+  // "overrides" limits the routed pair and passes everything else straight through.
+  assert.deepEqual(routeLimits(overrides, "nvidia", "glm"), { capacity: 3, perMinute: 30, perSecond: 0.5 });
+  assert.equal(routeLimits(overrides, "openrouter", "x"), null);
+
+  // A provider-wide row counts as an override for every model under it.
+  const wide = normalizeConfig({ scope: "overrides", models: [{ provider: "nvidia", model: "", requestsPerMinute: 7 }] });
+  assert.equal(routeLimits(wide, "nvidia", "anything").perMinute, 7);
+  assert.equal(routeLimits(wide, "other", "anything"), null);
+
+  // rpm 0 is a real unlimited-in-scope route, not "out of scope".
+  const unlimited = normalizeConfig({ scope: "all", requestsPerMinute: 0, models: [] });
+  assert.deepEqual(routeLimits(unlimited, "a", "b"), { capacity: 4, perMinute: 0, perSecond: 0 });
+
+  // Junk config falls back to the defaults instead of throwing.
+  assert.equal(routeLimits(null, "a", "b").perMinute, 20);
+  assert.equal(routeLimits({ models: "nope" }, "a", "b").perMinute, 20);
+});
+
+/* ------------------------------- backoff ----------------------------- */
 test("backoffDelayMs: Retry-After wins, otherwise exponential up to the cap", () => {
   const cfg = { backoffMs: 1000, maxBackoffMs: 8000, backoffJitter: 0 };
   const bucket = { consecutiveFails: 0 };
@@ -315,45 +348,40 @@ test("parseHeaderList: colon and full-width colon, null on a bad token", () => {
 
 /* -------------------------- model detection -------------------------- */
 
-test("mergeDetection: folds adapters, directory and both model sources", () => {
+test("mergeDetection: folds the added routes and their advertised models", () => {
   const providers = mergeDetection(
     [
       { id: "nvidia", name: "NVIDIA" },
       { id: "gone", name: "Gone", active: false }
     ],
-    [{ provider: "llm-pi-ai-custom", displayName: "Custom", settingsNs: "llm-pi-ai" }],
-    { nvidia: [{ id: "deepseek-v4.1-flash", name: "V4.1 Flash", contextWindow: 128000 }, { id: "glm" }] },
-    { "llm-pi-ai-custom": [{ id: "custom-model" }] }
+    { nvidia: [{ id: "deepseek-v4.1-flash", name: "V4.1 Flash", contextWindow: 128000 }, { id: "glm" }] }
   );
-  assert.deepEqual(providers.map((p) => p.id), ["llm-pi-ai-custom", "nvidia"]);
+  assert.deepEqual(providers.map((p) => p.id), ["nvidia"]);
 
-  const custom = providers[0];
-  assert.equal(custom.name, "Custom");
-  assert.equal(custom.settingsNs, "llm-pi-ai");
-  assert.deepEqual(custom.sources, ["directory", "discoverModels"]);
-  assert.deepEqual(custom.models.map((m) => m.id), ["custom-model"]);
-
-  const nvidia = providers[1];
+  const nvidia = providers[0];
   assert.equal(nvidia.name, "NVIDIA");
   assert.deepEqual(nvidia.sources, ["adapter", "listModels"]);
   assert.deepEqual(nvidia.models.map((m) => m.id), ["deepseek-v4.1-flash", "glm"]);
   assert.equal(nvidia.models[0].contextWindow, 128000);
   assert.equal(nvidia.models[1].name, "glm");
 
+  // Only the two added-route surfaces survive: the configurable directory and
+  // discovery provenance can never appear, so neither can `settingsNs`.
+  assert.equal("settingsNs" in nvidia, false);
   assert.deepEqual(providers.map((p) => p.id).includes("gone"), false);
-  assert.deepEqual(mergeDetection(null, null, null, null), []);
+  assert.deepEqual(mergeDetection(null, null), []);
 });
 
 test("mergeDetection: tolerates garbage in every input", () => {
-  const providers = mergeDetection([{ id: "", name: "x" }, null], [{}], { nvidia: [null, { id: "" }] }, {});
+  const providers = mergeDetection([{ id: "", name: "x" }, null], { nvidia: [null, { id: "" }] });
   // Blank ids are dropped; a real provider key survives even when every model in
   // it was unusable (the provider is still worth showing with an empty list).
   assert.deepEqual(providers.map((p) => p.id), ["nvidia"]);
   assert.deepEqual(providers[0].models, []);
   assert.deepEqual(providers[0].sources, ["listModels"]);
-  assert.deepEqual(mergeDetection(null, null, null, null), []);
-  assert.deepEqual(mergeDetection([{ id: 7 }], null, null, null), [
-    { id: "7", name: "7", sources: ["adapter"], settingsNs: undefined, models: [] }
+  assert.deepEqual(mergeDetection(null, null), []);
+  assert.deepEqual(mergeDetection([{ id: 7 }], null), [
+    { id: "7", name: "7", sources: ["adapter"], models: [] }
   ]);
 });
 

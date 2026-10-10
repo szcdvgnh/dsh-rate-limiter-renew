@@ -135,6 +135,7 @@ host hands the plugin a live reference and edits apply without a restart.
 | Key | Type | Default | Meaning |
 | --- | --- | --- | --- |
 | `enabled` | boolean | `true` | Master switch. Checked **per request**, so toggling it takes effect immediately (no listener re-registration). |
+| `scope` | `"all"` \| `"overrides"` | `"all"` | Which routes the limiter touches — see §4.1. "Off" is `enabled: false`, not a third scope. |
 | `requestsPerMinute` | number | `20` | Refill rate for the default route. **`0` means unlimited** — an explicit sentinel, not "unset". |
 | `burst` | number | `4` | Bucket capacity. `1` disables bursting. |
 | `mode` | `"wait"` \| `"reject"` | `"wait"` | What to do when the reserve would block. Unknown strings fall back to `wait`. |
@@ -144,12 +145,27 @@ host hands the plugin a live reference and edits apply without a restart.
 | `maxBackoffMs` | number | `60000` | Ceiling for the doubling cool-down. |
 | `backoffJitter` | number | `0` | `0..1` symmetric jitter applied to the cool-down. |
 | `maxConcurrentRequests` | number | `0` | In-flight cap per route. `0` = unlimited. Strict FIFO when > 0. |
-| `autoDetectModels` | boolean | `true` | Discover providers/models from the `llm` service. |
+| `autoDetectModels` | boolean | `true` | Detect the providers/models **you have already added** through the `llm` service. |
 | `detectIntervalMs` | number | `60000` | Discovery TTL/refresh interval (floor 5000 when > 0; `0` disables the timer). |
 | `models` | array | `[]` | Per-route overrides — see below. |
 | `identityRules` | array | `[]` | Gateway identity rewriting — see below. |
 
-### 4.1 Per-route overrides (`models`)
+### 4.1 Limit scope (`scope`)
+
+The page presents a single three-way choice; on disk it stays two fields, because
+"off" is the master switch:
+
+| Choice in the page | JSON | Effect |
+| --- | --- | --- |
+| On for every route | `scope: "all"`, `enabled: true` | Every (provider, model) pair is limited: the matching `models` row when there is one, the global `requestsPerMinute`/`burst` otherwise. |
+| Only routes with an override | `scope: "overrides"`, `enabled: true` | Only pairs matching a `models` row are limited. A route with no matching row passes straight through — no bucket, no queue, no 429 cool-down — and never shows up in the statistics. |
+| Off | `enabled: false` | Nothing is limited; the card and the composer dock both say so. |
+
+The choice is read **per request**, so switching it applies to the next call with
+no restart, and buckets for routes that just left the scope are dropped on the
+next statistics snapshot.
+
+### 4.2 Per-route overrides (`models`)
 
 ```yaml
 models:
@@ -174,7 +190,7 @@ row, and both beat the global default. A row whose `provider` matches but whose
 `model` pattern does not is skipped entirely (it does not fall back to a lesser
 match).
 
-### 4.2 Gateway identity rewriting (`identityRules`)
+### 4.3 Gateway identity rewriting (`identityRules`)
 
 Some gateways (OpenCode Zen above all) fingerprint the client. A rule rewrites
 the outbound request before it leaves the process:
@@ -205,25 +221,33 @@ The card has a one-click **Apply OpenCode Zen preset** button.
 
 ## 5. Automatic model detection
 
-This is the headline addition. The original plugin could not see anything the
-user had not typed by hand, because it walked a static route table. This plugin
-asks the host for the truth:
+The original plugin could not see anything the user had not typed by hand,
+because it walked a static route table. This plugin asks the host which routes
+are **already added**, so detection — and therefore the override rows — only ever
+surfaces providers and models the profile actually has:
 
-1. `llm.listProviders()` — every adapter in the registry;
-2. `llm.listConfigurableProviders()` — the profile-declared provider directory,
-   which carries the `settingsNs`/`settingsPath` of each provider config (this is
-   where e.g. a custom `llm-pi-ai` entry and its 10 providers show up);
-3. `llm.listModels(provider)` for anything the registry knows;
-4. `llm.discoverModels(settingsNs, { provider })` for directory providers that
-   came back empty — the same call the "Fetch models" button in the host UI makes.
+1. `llm.listProviders()` — the providers with a **registered adapter**, i.e. the
+   routes the profile has added;
+2. `llm.listModels(provider)` for each of those — the models the provider
+   advertises, i.e. the model ids present in your model list.
 
-The result is merged into `{ id, name, sources[], settingsNs, models[] }` per
-provider, cached for `detectIntervalMs` and invalidated by the
-`llm/adapters-updated` event (adapter registration or directory changes). The
-settings card renders it as a table with **Add all detected providers** and
-**Add missing models** buttons, and the provider column of the override rows is a
-`<select>` of the detected providers (plus `所有`/`all` and whatever value a row
-already holds).
+The result is merged into `{ id, name, sources[], models[] }` per provider
+(`sources` is `adapter` and/or `listModels`), cached for `detectIntervalMs` and
+invalidated by the `llm/adapters-updated` event (adapter registration changes the
+added set). The settings card renders one card per detected provider, with a chip
+per model: clicking a chip appends an override row, and **Add every provider
+(route-wide)** / **Add every model (per model)** bulk-fill the table. The provider
+column of an override row is a `<select>` of the detected providers (plus
+`所有`/`all` and whatever value a row already holds).
+
+Two nearby surfaces are deliberately **not** read: `llm.listConfigurableProviders()`
+(the profile-declared directory, which includes dormant providers that have no
+active adapter) and `llm.discoverModels()` (a draft-endpoint probe returning
+candidate models nothing has adopted yet). Both describe things you have *not*
+added, which is exactly what this panel must not offer. To limit a route that is
+not listed, type it into an override row directly (the model field is free text)
+or add it on the host's Models settings page — detection picks it up on the next
+refresh.
 
 Detection never throws: a provider that fails to answer is reported in the
 snapshot with its error and the rest of the catalogue is still usable.

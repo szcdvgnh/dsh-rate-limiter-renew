@@ -128,6 +128,7 @@ Release 上——預打包路線幾秒裝完，且不會執行任何建置腳本
 | 鍵 | 型別 | 預設 | 說明 |
 | --- | --- | --- | --- |
 | `enabled` | boolean | `true` | 總開關。**每個請求**都會檢查，切換後立即生效（不需重新註冊 listener）。 |
+| `scope` | `"all"` \| `"overrides"` | `"all"` | 限速要套用到哪些路由——見 §4.1。「全部關」是 `enabled: false`，不是第三種 scope。 |
 | `requestsPerMinute` | number | `20` | 預設路由的補充速率。**`0` 代表無限制**——這是明確的哨兵值，不是「未設定」。 |
 | `burst` | number | `4` | 桶容量。`1` 表示不允許突發。 |
 | `mode` | `"wait"` \| `"reject"` | `"wait"` | 預約會阻塞時的行為。無法辨識的字串會回退為 `wait`。 |
@@ -137,12 +138,24 @@ Release 上——預打包路線幾秒裝完，且不會執行任何建置腳本
 | `maxBackoffMs` | number | `60000` | 冷卻倍增的上限。 |
 | `backoffJitter` | number | `0` | `0..1` 的對稱抖動。 |
 | `maxConcurrentRequests` | number | `0` | 每路由同時進行中的上限。`0` 表示不限；> 0 時為嚴格 FIFO。 |
-| `autoDetectModels` | boolean | `true` | 是否向 `llm` 服務自動偵測供應商／模型。 |
+| `autoDetectModels` | boolean | `true` | 是否向 `llm` 服務偵測**你已經加入的**供應商／模型。 |
 | `detectIntervalMs` | number | `60000` | 偵測結果的 TTL／更新間隔（> 0 時下限為 5000；`0` 表示停用定時器）。 |
 | `models` | array | `[]` | 每路由覆寫，見下。 |
 | `identityRules` | array | `[]` | 閘道身份改寫，見下。 |
 
-### 4.1 每路由覆寫（`models`）
+### 4.1 限速範圍（`scope`）
+
+頁面上是一個三選一的選單；寫進設定檔時仍然是兩個欄位，因為「全部關」就是總開關本身：
+
+| 頁面選項 | JSON | 效果 |
+| --- | --- | --- |
+| 全部都開（所有路由） | `scope: "all"`, `enabled: true` | 每個（供應商, 模型）都限速：有命中 `models` 列就用那一列，否則用全域 `requestsPerMinute`/`burst`。 |
+| 只為路由覆寫開 | `scope: "overrides"`, `enabled: true` | 只有命中 `models` 列的（供應商, 模型）才限速。沒有對應覆寫列的路由直接放行——不進桶、不排隊、不做 429 冷卻，也不會出現在統計裡。 |
+| 全部關 | `enabled: false` | 完全不限速，卡片與輸入框下方的狀態列都會標示。 |
+
+這個選擇是**每個請求**重新讀取的，所以切換後下一個請求就生效、不必重啟；剛離開範圍的路由桶會在下一次統計快照時移除。
+
+### 4.2 每路由覆寫（`models`）
 
 ```yaml
 models:
@@ -164,7 +177,7 @@ models:
 因此：精確 > 子串、模型 pattern > 供應商全域、具體 > 全域；若某列的
 `provider` 命中但 `model` pattern 不命中，該列會被整條跳過（不會退化成次級命中）。
 
-### 4.2 閘道身份改寫（`identityRules`）
+### 4.3 閘道身份改寫（`identityRules`）
 
 某些閘道（尤其 OpenCode Zen）會對客戶端做指紋辨識。規則會在請求離開行程前
 改寫它：
@@ -195,23 +208,29 @@ identityRules:
 
 ## 5. 自動偵測模型
 
-這是本次最重要的新增能力。舊插件看不到任何使用者沒有手打的東西，因為它只走
-靜態路由表。本插件直接向 host 要真相：
+舊插件看不到任何使用者沒有手打的東西，因為它只走靜態路由表。本插件向 host
+詢問**已經加入**的路由，因此偵測（以及連帶的覆寫列）只會出現 profile 真正
+擁有的供應商與模型：
 
-1. `llm.listProviders()` —— registry 中所有 adapter；
-2. `llm.listConfigurableProviders()` —— profile 宣告的供應商目錄，帶有每個
-   供應商設定的 `settingsNs`/`settingsPath`（例如自訂的 `llm-pi-ai` entry 與
-   它底下的 10 個供應商就是在這裡出現）；
-3. `llm.listModels(provider)` —— registry 已知的模型；
-4. 對目錄中回傳空清單的供應商，改用
-   `llm.discoverModels(settingsNs, { provider })`——與 host UI 的
-   「取得模型」按鈕是同一個呼叫。
+1. `llm.listProviders()` —— 具有**已註冊 adapter** 的供應商，也就是 profile
+   已經加入的路由；
+2. 對每一個這種供應商呼叫 `llm.listModels(provider)` —— 該供應商回報的模型，
+   也就是你模型清單裡實際存在的 model id。
 
-結果會合併為每個供應商的 `{ id, name, sources[], settingsNs, models[] }`，
-以 `detectIntervalMs` 為 TTL 快取，並由 `llm/adapters-updated` 事件失效
-（adapter 註冊或目錄變動時）。設定卡片以表格呈現，並提供
-**加入所有偵測到的供應商** 與 **補齊缺少的模型** 兩個按鈕；覆寫列的
-provider 欄位是偵測結果的 `<select>`（另有「所有」與列上既有的值）。
+結果會合併為每個供應商的 `{ id, name, sources[], models[] }`（`sources` 為
+`adapter` 與／或 `listModels`），以 `detectIntervalMs` 為 TTL 快取，並由
+`llm/adapters-updated` 事件失效（adapter 註冊會改變「已加入」集合）。設定
+卡片為每個偵測到的供應商顯示一張卡片，每個模型是一個 chip：點擊 chip 會新增
+一列覆寫；**加入所有供應商（整條路由）** 與 **加入所有模型（逐模型）** 可批次
+填入表格。覆寫列的 provider 欄位是偵測結果的 `<select>`（另有「所有」與列上
+既有的值）。
+
+另外兩個相鄰介面刻意**不**讀取：`llm.listConfigurableProviders()`（profile
+宣告的供應商目錄，包含沒有作用中 adapter 的休眠供應商）與
+`llm.discoverModels()`（對草稿端點探測、回傳尚未被採用的候選模型）。兩者
+描述的都是你**還沒加入**的東西，正是這個面板不該提供的內容。若要限制尚未
+列出的路由，請直接在覆寫列手動輸入（模型欄位是自由文字），或先到 host 的
+「模型」設定頁加入，下次偵測就會帶進來。
 
 偵測永不拋錯：某個供應商失敗會連同錯誤一起出現在快照中，其餘目錄照常可用。
 

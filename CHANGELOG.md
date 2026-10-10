@@ -1,5 +1,48 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+* **Model detection now reports only the routes you have added.** The limiter
+  reads `llm.listProviders()` (providers with a registered adapter) and then
+  `llm.listModels(provider)` for each of them, instead of also folding in
+  `llm.listConfigurableProviders()` (the whole profile-declared directory,
+  including dormant providers) and `llm.discoverModels()` (draft-endpoint
+  candidates nothing has adopted yet). The detection panel and the provider
+  `<select>` on the override rows therefore list exactly the providers and models
+  in your model list. `mergeDetection()` lost its `directory` and
+  `discoveredByProvider` parameters, and a provider row no longer carries
+  `settingsNs` or the `directory`/`discoverModels` source tags.
+* **Settings card restyle.** The card is now a hierarchical panel: a clickable
+  header with status pills, sectioned `<details>` folds with icons and counts, a
+  provider/model chip picker that marks the models you already have, boxed metric
+  tiles for the live counters, a sticky action bar with a dirty indicator, and a
+  palette built from the documented `--dsw-alias-*` tokens — replacing the
+  nonexistent `--dsw-alias-label-tertiary` / `--dsw-alias-status-danger`
+  variables and the hard-coded dark-mode override. Inputs, selects and buttons
+  now carry explicit styling instead of depending on host defaults.
+
+### Added
+
+* **Three-way limit scope.** `scope: "all"` (the default) limits every route,
+  `scope: "overrides"` limits only the routes that match a row in `models` and
+  lets every other route pass through untouched, and `enabled: false` turns the
+  limiter off entirely. The card presents the choice as one select (全部都開 /
+  只為路由覆寫開 / 全部關) plus an explanatory note. `routeLimits()` in
+  `lib/core.js` is the new single gate: it returns `null` for an out-of-scope
+  route, and `resolveBucket`, `routeStats` and `getStats` all skip — and prune —
+  such routes, so they never enter the statistics either.
+* `docs/preview.mjs`, which generates `docs/preview.html` — a static mock of the
+  settings card (its stylesheet is extracted from `lib/client.js`) for reviewing
+  the look without installing the plugin. Not included in the published `files`.
+
+### Fixed
+
+* The English dictionary was missing `dockQueued`, so the composer dock printed
+  `undefined` for the queued count in English. A new test now asserts both
+  dictionaries carry exactly the same keys, in both directions.
+
 ## 1.0.0
 
 First release of `dsh-rate-limiter-renew`, a continuation of

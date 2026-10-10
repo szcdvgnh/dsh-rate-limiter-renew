@@ -46,6 +46,8 @@ const z = {
   string: () => new Schema("string", {}),
   number: () => new Schema("number", {}),
   boolean: () => new Schema("boolean", {}),
+  const: (value) => new Schema("const", { value }),
+  union: (list) => new Schema("union", { list }),
   array: (inner) => new Schema("array", { inner }),
   object: (shape) => new Schema("object", { shape }),
   Schema
