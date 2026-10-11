@@ -73,6 +73,13 @@
   The disabled state now declares its own neutral background, border and label
   colour and is emitted after the primary/danger fills so it wins the cascade,
   and the base button no longer inherits its text colour from the host.
+* **The primary (enabled) Save button was white-on-white**: any time an edit made
+  Save clickable, the blue fill disappeared because `--dsw-alias-brand-primary`
+  resolves to `--dsw-static-neutral-bluish-50` (near-white) in DSH's light theme,
+  so the theme was asked to paint a near-white fill — the label, depending on
+  light/dark theme, ended up painted to a near-white tile (the "enabled" state
+  looks white in light theme). The primary button now uses a fixed blue
+  (`#2f6fdb`) with `!important`.
 * Discovery warnings rendered without React keys.
 * `test/client.test.mjs` gained a render-interaction test (a stateful React stub
   that replays handlers and re-renders), covering the Save button, the provider
