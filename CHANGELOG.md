@@ -47,11 +47,13 @@
   `serializeDraft()` deliberately drops rows without a provider/model (they would
   match every route), so the two payloads were still identical. It now compares
   the drafts themselves.
-* **Changing a row's provider made its models unpickable.** The previous model
-  stayed in the text box, and a native `<datalist>` filters its options by the
-  text already entered, so every one of the new provider's models was hidden.
-  Switch to another provider and the model is now cleared unless that provider
-  actually advertises it.
+* **Choosing a different model for a row meant clearing the box by hand.** A
+  native `<datalist>` filters its options by the text already in the field, so as
+  soon as a model was picked the list collapsed to that single entry. Every
+  override row now also carries a `▾ 選擇模型…` dropdown that always lists the
+  provider's whole set. Switching a row to a provider that does not advertise the
+  previous model also clears it, instead of leaving a model behind that the new
+  provider does not have.
 * A route row whose provider is no longer in the detected list rendered as
   `（全部）` while still saving that provider, because the `<select>` value fell
   back to `""`. The row now displays its real provider.
@@ -65,10 +67,17 @@
 * The stale-settings warning disappeared immediately, because the reload it
   triggers cleared the notice on its success path — the reload now runs first.
 * 重設統計 reported success even when the bridge request failed.
+* **The disabled Save button was unreadable.** `:disabled` only lowered the
+  button's opacity, so the primary fill and its white label faded into a pale
+  blue wash — which is the state Save is in whenever nothing has been edited yet.
+  The disabled state now declares its own neutral background, border and label
+  colour and is emitted after the primary/danger fills so it wins the cascade,
+  and the base button no longer inherits its text colour from the host.
 * Discovery warnings rendered without React keys.
 * `test/client.test.mjs` gained a render-interaction test (a stateful React stub
   that replays handlers and re-renders), covering the Save button, the provider
-  switch, an off-directory provider and an emptied number box. 57 tests.
+  switch, an off-directory provider, an emptied number box and the model
+  dropdown. 57 tests.
 
 ## 1.0.0
 

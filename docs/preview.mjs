@@ -253,14 +253,24 @@ ${provider("OpenRouter", "openrouter", [])}
                 <tbody>
                   <tr>
                     <td><select class="rlr_select"><option>nvidia</option></select></td>
-                    <td><input class="rlr_input" type="text" value="deepseek-v4.1-flash" /></td>
+                    <td>
+                      <div class="rlr_pair">
+                        <input class="rlr_input" type="text" value="deepseek-v4.1-flash" />
+                        <select class="rlr_select rlr_pick"><option>▾ 選擇模型…</option><option>deepseek-v4.1-flash</option><option>glm-4.6</option></select>
+                      </div>
+                    </td>
                     <td><input class="rlr_input" type="number" value="60" /></td>
                     <td><input class="rlr_input" type="number" value="2" /></td>
                     <td class="rlr_actions-cell"><button class="rlr_btn" type="button" data-danger="true">移除</button></td>
                   </tr>
                   <tr>
                     <td><select class="rlr_select"><option>（全部）</option></select></td>
-                    <td><input class="rlr_input" type="text" placeholder="（全部）" /></td>
+                    <td>
+                      <div class="rlr_pair">
+                        <input class="rlr_input" type="text" placeholder="（全部）" />
+                        <select class="rlr_select rlr_pick"><option>▾ 選擇模型…</option><option>deepseek-v4.1-flash</option><option>glm-4.6</option><option>llama-3.3-70b</option></select>
+                      </div>
+                    </td>
                     <td><input class="rlr_input" type="number" value="20" /></td>
                     <td><input class="rlr_input" type="number" value="4" /></td>
                     <td class="rlr_actions-cell"><button class="rlr_btn" type="button" data-danger="true">移除</button></td>
@@ -315,11 +325,11 @@ ${metric("冷卻中", "1", "error")}
         </details>
 
         <div class="rlr_actionBar">
-          <button class="rlr_btn" type="button" data-quiet="true">放棄變更</button>
+          <button class="rlr_btn" type="button" data-quiet="true" disabled>放棄變更</button>
           <button class="rlr_btn" type="button" data-danger="true">回復預設</button>
           <span class="rlr_spacer"></span>
           <span class="rlr_dirty">尚未儲存</span>
-          <button class="rlr_btn" type="button" data-primary="true">儲存</button>
+          <button class="rlr_btn" type="button" data-primary="true" disabled>儲存</button>
         </div>
       </div>
     </div>

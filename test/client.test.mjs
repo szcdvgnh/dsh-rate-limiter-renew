@@ -319,6 +319,22 @@ test("client: interacting with the card keeps Save and the model list honest", a
   const list = surface.nodes().find((n) => n.type === "datalist" && n.props.id === modelInput.props.list);
   assert.deepEqual(list.children.map((o) => o.props.value), ["llama-3.3-70b"]);
 
+  // The dropdown must keep offering the provider's whole list even when the box
+  // already holds a model, otherwise picking a second one means clearing the
+  // field by hand first (the datalist collapses to the current value).
+  surface.mount(base);
+  const modelPicker = () =>
+    surface.nodes().find(
+      (n) => n.type === "select" && typeof n.props.className === "string" && n.props.className.includes("rlr_pick")
+    );
+  const modelValue = () => surface.nodes().find((n) => n.type === "input" && n.props.list).props.value;
+  assert.deepEqual(modelPicker().children.map((o) => o.props.value), ["", "deepseek-v4.1-flash", "glm-4.6"]);
+  surface.act(modelPicker().props.onChange, { target: { value: "glm-4.6" } });
+  assert.equal(modelValue(), "glm-4.6");
+  assert.deepEqual(modelPicker().children.map((o) => o.props.value), ["", "deepseek-v4.1-flash", "glm-4.6"]);
+  surface.act(modelPicker().props.onChange, { target: { value: "deepseek-v4.1-flash" } });
+  assert.equal(modelValue(), "deepseek-v4.1-flash");
+
   // A provider detection does not know must still be shown, not silently
   // rendered as "（全部）" while the row actually saves that provider.
   surface.mount({ ...base, models: [{ provider: "zai", model: "glm-4.6", requestsPerMinute: 5, burst: 2 }] });
