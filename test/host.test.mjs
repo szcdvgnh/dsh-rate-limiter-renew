@@ -490,11 +490,16 @@ test("host: gateway identity rules rewrite the outbound request", async () => {
     assert.equal(second.get("x-opencode-session"), session);
     assert.notEqual(second.get("x-opencode-request"), request);
 
-    // Request objects take the copy-through branch.
-    await fetch(new Request("https://opencode.ai/zen/v1/models", { headers: { "user-agent": "orig-2" } }));
+    // Request objects: the rewrite travels in `init` (fetch() merges it over the
+    // Request), and the caller's Request is passed through *unrebuilded* — a
+    // rebuilt Request would have transferred/disturbed its body stream before
+    // any throw, so a failed rewrite could kill an unrelated caller's request.
+    const requestObject = new Request("https://opencode.ai/zen/v1/models", { headers: { "user-agent": "orig-2" } });
+    await fetch(requestObject);
     assert.equal(seen.length, 3);
-    assert.ok(seen[2].input instanceof Request);
-    assert.equal(new Headers(seen[2].input.headers).get("user-agent"), "UA-TEST");
+    assert.equal(seen[2].input, requestObject, "the caller's Request must not be rebuilt");
+    assert.equal(new Headers(seen[2].init.headers).get("user-agent"), "UA-TEST");
+    assert.equal(new Headers(seen[2].input.headers).get("user-agent"), "orig-2");
 
     // A non-matching URL is passed through untouched.
     await fetch("https://example.com/other");

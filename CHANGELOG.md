@@ -73,18 +73,27 @@
   The disabled state now declares its own neutral background, border and label
   colour and is emitted after the primary/danger fills so it wins the cascade,
   and the base button no longer inherits its text colour from the host.
-* **The primary (enabled) Save button was white-on-white**: any time an edit made
-  Save clickable, the blue fill disappeared because `--dsw-alias-brand-primary`
-  resolves to `--dsw-static-neutral-bluish-50` (near-white) in DSH's light theme,
-  so the theme was asked to paint a near-white fill — the label, depending on
-  light/dark theme, ended up painted to a near-white tile (the "enabled" state
-  looks white in light theme). The primary button now uses a fixed blue
-  (`#2f6fdb`) with `!important`.
+* **The *enabled* Save button could still render white-on-white.** Its fill came
+  from `--dsw-alias-brand-primary`, so any host rule with a stronger selector (or
+  a theme whose brand token resolves light) left the white 儲存 label sitting on
+  the host's own background. The primary fill is now a literal blue pinned with
+  `!important` on this plugin's own button, the disabled state is pinned to match,
+  and a guard test reads the shipped stylesheet and asserts both.
+* **A matching identity rule could take an unrelated request down with it.** For
+  `fetch(request, init)` calls the wrapper rebuilt the `Request` to attach its
+  headers, which hands the body stream over to the new object *before* anything
+  can fail — a rejected rebuild (undici refuses a stream body without `duplex`)
+  left the caller with a disturbed body, and every other plugin fetching a URL
+  that matched a rule went through that path. The headers now travel in `init`,
+  which the fetch spec merges over the `Request` itself, and the caller's object
+  is passed through untouched.
 * Discovery warnings rendered without React keys.
 * `test/client.test.mjs` gained a render-interaction test (a stateful React stub
   that replays handlers and re-renders), covering the Save button, the provider
   switch, an off-directory provider, an emptied number box and the model
-  dropdown. 57 tests.
+  dropdown, plus a guard test over the shipped stylesheet (every selector scoped
+  to `.rlr_`, the primary fill pinned, the disabled state declared last). 58
+  tests.
 
 ## 1.0.0
 

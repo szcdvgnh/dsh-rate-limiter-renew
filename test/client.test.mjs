@@ -9,6 +9,7 @@
  * Run: node --test --test-isolation=none test/client.test.mjs
  */
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 /* ------------------------------- stubs -------------------------------- */
@@ -353,4 +354,45 @@ test("client: interacting with the card keeps Save and the model list honest", a
     `expected the ${delivered.DICT.zh.defaultRpm} validation note, got ${JSON.stringify(notes)}`
   );
   assert.ok(!notes.some((line) => line.includes("requestsPerMinute")), "the note must not leak a raw dictionary key");
+});
+
+/**
+ * The stylesheet is injected into `document.head`, so a single unscoped selector
+ * would restyle the whole GUI, and the save button's label has to survive the
+ * host's own button rules. Both are invisible to a React-stub test, so they are
+ * asserted against the shipped CSS text.
+ */
+test("client: the injected stylesheet stays scoped and keeps the save label readable", () => {
+  const source = readFileSync(new URL("../lib/client.js", import.meta.url), "utf8");
+  const start = source.indexOf("const css = [");
+  assert.notEqual(start, -1, "the `const css = [` block moved");
+  const open = start + "const css = ".length;
+  const close = source.indexOf('].join("");', open);
+  assert.notEqual(close, -1, 'the `].join("");` terminator moved');
+  const css = Function(`"use strict";return (${source.slice(open, close + 1)});`)().join("");
+
+  // 1. Nothing may leak onto other plugins or the app shell.
+  for (const chunk of css.split("{").slice(0, -1)) {
+    const selector = chunk.slice(chunk.lastIndexOf("}") + 1).trim();
+    if (selector.startsWith("@")) continue;
+    for (const part of selector.split(",")) {
+      const item = part.trim();
+      if (item === "" || /^[\d,%\s]+$/.test(item) || /^(from|to)$/.test(item)) continue; // @keyframes steps
+      assert.ok(item.includes(".rlr_"), `unscoped selector escapes the card: ${JSON.stringify(item)}`);
+    }
+  }
+
+  // 2. The primary fill is a literal, pinned blue: with a token the host theme
+  //    could resolve to a light colour the white "儲存" label disappeared.
+  const primary = css.match(/\.rlr_btn\[data-primary=true\]\{([^}]*)\}/);
+  assert.ok(primary, "the primary button rule is missing");
+  assert.match(primary[1], /background:#[0-9a-f]{6}!important/, "the primary fill must not depend on a theme token");
+  assert.match(primary[1], /color:#fff!important/, "the primary label must be pinned white");
+
+  // 3. The disabled state has to beat the pinned primary fill, and be declared
+  //    after it, or a dead button keeps looking like an enabled one.
+  const disabled = css.match(/\.rlr_btn:disabled[^{]*\{([^}]*)\}/);
+  assert.ok(disabled, "the disabled button rule is missing");
+  assert.match(disabled[1], /background:[^;]*!important/, "disabled must override the pinned primary fill");
+  assert.ok(css.indexOf("[data-primary=true]{") < css.indexOf(".rlr_btn:disabled"), "disabled must be declared last");
 });
