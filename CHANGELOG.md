@@ -42,6 +42,33 @@
 * The English dictionary was missing `dockQueued`, so the composer dock printed
   `undefined` for the queued count in English. A new test now asserts both
   dictionaries carry exactly the same keys, in both directions.
+* **Save stayed disabled after adding an empty route row.** The dirty check
+  compared `serializeDraft(draft)` with `serializeDraft(loaded)`, but
+  `serializeDraft()` deliberately drops rows without a provider/model (they would
+  match every route), so the two payloads were still identical. It now compares
+  the drafts themselves.
+* **Changing a row's provider made its models unpickable.** The previous model
+  stayed in the text box, and a native `<datalist>` filters its options by the
+  text already entered, so every one of the new provider's models was hidden.
+  Switch to another provider and the model is now cleared unless that provider
+  actually advertises it.
+* A route row whose provider is no longer in the detected list rendered as
+  `（全部）` while still saving that provider, because the `<select>` value fell
+  back to `""`. The row now displays its real provider.
+* Checkbox fields printed their label twice (`field()` plus the label inside
+  `checkInput()`): 上游 429 冷卻, 自動偵測我的模型, 啟用 and 動態 ID.
+* Clearing a number box silently saved `0` (`Number("") === 0`), which means
+  "unlimited" for rpm/concurrency and "reject immediately" for `maxWaitMs`. An
+  emptied field is now a validation error and blocks Save, and `intOr()`
+  falls back instead of coercing. The validation note was also printing the raw
+  key `requestsPerMinute`; it now says 預設 RPM.
+* The stale-settings warning disappeared immediately, because the reload it
+  triggers cleared the notice on its success path — the reload now runs first.
+* 重設統計 reported success even when the bridge request failed.
+* Discovery warnings rendered without React keys.
+* `test/client.test.mjs` gained a render-interaction test (a stateful React stub
+  that replays handlers and re-renders), covering the Save button, the provider
+  switch, an off-directory provider and an emptied number box. 57 tests.
 
 ## 1.0.0
 

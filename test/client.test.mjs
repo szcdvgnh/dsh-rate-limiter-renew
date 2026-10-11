@@ -15,14 +15,38 @@ import test from "node:test";
 
 const REQUIRED = new Set();
 
+/**
+ * A minimal but *stateful* React runtime. The real GUI re-renders on every
+ * setState, so a bug that only appears after an interaction (a stale datalist, a
+ * Save button that never enables) is invisible to a stub whose setter is a
+ * no-op. `useState` therefore owns a real cell array and flags a re-render.
+ */
+let cursor = 0;
+let dirty = false;
+const cells = [];
+
+const reactRuntime = {
+  createElement: (type, props, ...children) => ({ __vnode: true, type, props: props ?? {}, children }),
+  useState(initial) {
+    const index = cursor++;
+    if (!(index in cells)) cells[index] = typeof initial === "function" ? initial() : initial;
+    const set = (next) => {
+      const value = typeof next === "function" ? next(cells[index]) : next;
+      if (value !== cells[index]) {
+        cells[index] = value;
+        dirty = true;
+      }
+    };
+    return [cells[index], set];
+  },
+  useEffect: () => {},
+  useCallback: (fn) => fn,
+  useMemo: (fn) => fn()
+};
+
 function makeReactStub() {
   REQUIRED.add("react");
-  return {
-    createElement: (type, props, ...children) => ({ __vnode: true, type, props: props ?? {}, children }),
-    useState: (initial) => [typeof initial === "function" ? initial() : initial, () => {}],
-    useEffect: () => {},
-    useCallback: (fn) => fn
-  };
+  return reactRuntime;
 }
 
 /**
@@ -177,4 +201,140 @@ test("client: the bundle never touches document or navigator without checking", 
 test("client: react is the only runtime dependency the bundle requires", async () => {
   await loadBundle();
   assert.deepEqual([...REQUIRED], ["react"]);
+});
+
+/* --------------------- interaction (re-render) tests -------------------- */
+
+function textOf(node) {
+  return node.children.flat(Infinity).filter((child) => typeof child === "string" || typeof child === "number").join("");
+}
+
+function* walkTree(node) {
+  if (node === null || node === undefined || typeof node !== "object") return;
+  if (Array.isArray(node)) {
+    for (const child of node) yield* walkTree(child);
+    return;
+  }
+  if (node.__vnode) {
+    yield node;
+    for (const child of node.children) yield* walkTree(child);
+  }
+}
+
+/**
+ * RateLimiterCard's hook cells in call order. The stub has no reconciler, so the
+ * card is invoked directly with these seeded, and the resulting handler props are
+ * replayed to emulate one interaction at a time.
+ * 0 stats · 1 draft · 2 loaded · 3 revision · 4 writable · 5 status ·
+ * 6 detection · 7 notice · 8 saving · 9 open · 10 detecting
+ */
+function mountCard(Component, t, draft, loaded, detection) {
+  cursor = 0;
+  dirty = false;
+  cells.length = 0;
+  cells.push(null, draft, loaded, 7, true, "ready", detection, null, false, true, false);
+  return Component({ t, page: true });
+}
+
+function makeSurface(Component, t, detection) {
+  let tree = null;
+  const nodes = () => [...walkTree(tree)];
+  return {
+    nodes,
+    /** Replay a handler, then re-render until setState settles (real GUI loop). */
+    act(handler, event) {
+      handler(event);
+      let guard = 0;
+      while (dirty && guard++ < 30) {
+        cursor = 0;
+        dirty = false;
+        tree = Component({ t, page: true });
+      }
+    },
+    mount(draft, loaded = draft) {
+      tree = mountCard(Component, t, draft, loaded, detection);
+      return tree;
+    },
+    save: () => nodes().find((n) => n.type === "button" && n.props["data-primary"]),
+    button: (label) => nodes().find((n) => n.type === "button" && textOf(n) === label)
+  };
+}
+
+test("client: interacting with the card keeps Save and the model list honest", async () => {
+  const { delivered } = await loadBundle();
+  const slots = makeSlots();
+  delivered.apply({ get: () => undefined, effect: (fn) => fn(), slots });
+  const row = slots.registered.find((entry) => entry.descriptor.name === "plugins.row.config");
+  const Component = row.render({ view: "page" }).type;
+  const t = (key) => delivered.DICT.zh[key] ?? key;
+
+  const detection = {
+    providers: [
+      { id: "nvidia", name: "NVIDIA", models: [{ id: "deepseek-v4.1-flash" }, { id: "glm-4.6" }] },
+      { id: "openrouter", name: "OpenRouter", models: [{ id: "llama-3.3-70b" }] }
+    ],
+    errors: [],
+    detectedAt: 0
+  };
+  const base = {
+    scope: "all",
+    requestsPerMinute: 20,
+    burst: 4,
+    mode: "wait",
+    maxWaitMs: 30000,
+    upstream429Backoff: true,
+    backoffMs: 30000,
+    maxBackoffMs: 60000,
+    backoffJitter: 0,
+    maxConcurrentRequests: 0,
+    autoDetectModels: true,
+    detectIntervalMs: 60000,
+    models: [{ provider: "nvidia", model: "deepseek-v4.1-flash", requestsPerMinute: 20, burst: 4 }],
+    identityRules: []
+  };
+  const surface = makeSurface(Component, t, detection);
+  const providerSelect = () =>
+    surface.nodes().find((n) => n.type === "select" && n.children.some((o) => o.props && o.props.value === "openrouter"));
+
+  // An unchanged draft has nothing to save.
+  surface.mount(base);
+  assert.equal(surface.save().props.disabled, true);
+  assert.equal(surface.save().props["data-primary"], "true");
+
+  // Adding an empty route row is still a change worth saving. This used to leave
+  // Save disabled, because serializeDraft() drops rows without a provider.
+  surface.mount(base);
+  surface.act(surface.button(delivered.DICT.zh.addRow).props.onClick);
+  assert.equal(surface.nodes().filter((n) => n.type === "input" && n.props.list).length, 2);
+  assert.equal(surface.save().props.disabled, false);
+
+  // Switching the row to another provider must drop the model that provider does
+  // not advertise: a native <datalist> filters by the text in the box, so the
+  // left-over model used to hide every suggestion and the model became unpickable.
+  surface.mount(base);
+  surface.act(providerSelect().props.onChange, { target: { value: "openrouter" } });
+  const modelInput = surface.nodes().find((n) => n.type === "input" && n.props.list);
+  assert.equal(providerSelect().props.value, "openrouter");
+  assert.equal(modelInput.props.value, "");
+  const list = surface.nodes().find((n) => n.type === "datalist" && n.props.id === modelInput.props.list);
+  assert.deepEqual(list.children.map((o) => o.props.value), ["llama-3.3-70b"]);
+
+  // A provider detection does not know must still be shown, not silently
+  // rendered as "（全部）" while the row actually saves that provider.
+  surface.mount({ ...base, models: [{ provider: "zai", model: "glm-4.6", requestsPerMinute: 5, burst: 2 }] });
+  assert.equal(providerSelect().props.value, "zai");
+
+  // An emptied number box must block Save rather than silently serialize as 0.
+  surface.mount(base);
+  surface.act(
+    surface.nodes().find((n) => n.type === "input" && n.props.type === "number" && n.props.value === 20).props.onChange,
+    { target: { value: "" } }
+  );
+  assert.equal(surface.save().props.disabled, true);
+  const notes = surface.nodes().filter((n) => n.props && n.props.className === "rlr_note").map((n) => textOf(n));
+  assert.ok(
+    notes.some((line) => line.includes(delivered.DICT.zh.defaultRpm)),
+    `expected the ${delivered.DICT.zh.defaultRpm} validation note, got ${JSON.stringify(notes)}`
+  );
+  assert.ok(!notes.some((line) => line.includes("requestsPerMinute")), "the note must not leak a raw dictionary key");
 });
