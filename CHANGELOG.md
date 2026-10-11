@@ -4,6 +4,15 @@
 
 ### Changed
 
+* **One model control per override row, always re-selectable.** The model cell
+  used to be a text input with an attached `<datalist>` *plus* a second
+  `▾ 選擇模型…` picker `<select>` — two dropdowns side by side. It is now a
+  single `<select>` (like the provider column) that always lists the provider's
+  full set plus a leading `（全部）` option, so a chosen model stays editable at
+  any time without clearing the field by hand. A stored model detection does not
+  know (hand-edited substring pattern, removed provider) still appears as a
+  trailing option, mirroring the provider column. The `.rlr_pair`/`.rlr_pick`
+  styles and the per-row `<datalist>` are gone.
 * **Model detection now reports only the routes you have added.** The limiter
   reads `llm.listProviders()` (providers with a registered adapter) and then
   `llm.listModels(provider)` for each of them, instead of also folding in
@@ -22,6 +31,11 @@
   nonexistent `--dsw-alias-label-tertiary` / `--dsw-alias-status-danger`
   variables and the hard-coded dark-mode override. Inputs, selects and buttons
   now carry explicit styling instead of depending on host defaults.
+* **Basic settings are grouped by concern.** The former flat 10-field grid is
+  now three labelled groups with rule-line headings — 基本設定 (scope, default
+  RPM, burst), 排隊與併發 (empty-bucket mode, max wait, max concurrency) and
+  退避設定 (429 back-off toggle, base/ceiling/jitter) — via new `.rlr_groups` /
+  `.rlr_group` styles, so each field sits next to the ones it interacts with.
 
 ### Added
 
@@ -39,6 +53,9 @@
 
 ### Fixed
 
+* **The override table showed only column headers when no rows exist.** It now
+  renders an empty state (`rowsEmpty`) with a pointer to 新增路由, matching the
+  detection panel.
 * The English dictionary was missing `dockQueued`, so the composer dock printed
   `undefined` for the queued count in English. A new test now asserts both
   dictionaries carry exactly the same keys, in both directions.
@@ -49,11 +66,11 @@
   the drafts themselves.
 * **Choosing a different model for a row meant clearing the box by hand.** A
   native `<datalist>` filters its options by the text already in the field, so as
-  soon as a model was picked the list collapsed to that single entry. Every
-  override row now also carries a `▾ 選擇模型…` dropdown that always lists the
-  provider's whole set. Switching a row to a provider that does not advertise the
-  previous model also clears it, instead of leaving a model behind that the new
-  provider does not have.
+  soon as a model was picked the list collapsed to that single entry — first
+  patched with a second `▾ 選擇模型…` dropdown, now resolved by collapsing the
+  cell into the single always-listed `<select>` described above. Switching a row
+  to a provider that does not advertise the previous model also clears it,
+  instead of leaving a model behind that the new provider does not have.
 * A route row whose provider is no longer in the detected list rendered as
   `（全部）` while still saving that provider, because the `<select>` value fell
   back to `""`. The row now displays its real provider.

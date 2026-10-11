@@ -174,32 +174,76 @@ ${css}
         <div class="rlr_note" data-kind="warn">目前設定不可寫入。</div>
         <div class="rlr_note" data-kind="info">只有符合覆寫列的路由會受限速；其他路由直接放行。</div>
 
-        <div class="rlr_grid">
-          <div class="rlr_field">
-            <span class="rlr_label">限速範圍</span>
-            <select class="rlr_select">
-              <option>全部都開（所有路由）</option>
-              <option selected>只為路由覆寫開</option>
-              <option>全部關</option>
-            </select>
-            <span class="rlr_hint">決定哪些路由會被限速。「只為路由覆寫開」時，沒有對應覆寫列的路由完全不受影響。</span>
+        <div class="rlr_groups">
+          <div class="rlr_group">
+            <div class="rlr_groupTitle">基本設定</div>
+            <div class="rlr_grid">
+              <div class="rlr_field">
+                <span class="rlr_label">限速範圍</span>
+                <select class="rlr_select">
+                  <option>全部都開（所有路由）</option>
+                  <option selected>只為路由覆寫開</option>
+                  <option>全部關</option>
+                </select>
+                <span class="rlr_hint">決定哪些路由會被限速。「只為路由覆寫開」時，沒有對應覆寫列的路由完全不受影響。</span>
+              </div>
+              <div class="rlr_field">
+                <span class="rlr_label">預設 RPM</span>
+                <input class="rlr_input" type="number" value="20" />
+                <span class="rlr_hint">每個（供應商, 模型）的每分鐘上限；0 = 不限制。</span>
+              </div>
+              <div class="rlr_field">
+                <span class="rlr_label">突發額度</span>
+                <input class="rlr_input" type="number" value="4" />
+                <span class="rlr_hint">空閒後可立即發出的最大請求數。</span>
+              </div>
+            </div>
           </div>
-          <div class="rlr_field">
-            <span class="rlr_label">預設 RPM</span>
-            <input class="rlr_input" type="number" value="20" />
-            <span class="rlr_hint">每個（供應商, 模型）的每分鐘上限；0 = 不限制。</span>
+          <div class="rlr_group">
+            <div class="rlr_groupTitle">排隊與併發</div>
+            <div class="rlr_grid">
+              <div class="rlr_field">
+                <span class="rlr_label">空桶行為</span>
+                <select class="rlr_select">
+                  <option>等待（排隊）</option>
+                  <option>拒絕（回傳 429）</option>
+                </select>
+              </div>
+              <div class="rlr_field">
+                <span class="rlr_label">最大等待（毫秒）</span>
+                <input class="rlr_input" type="number" value="30000" />
+                <span class="rlr_hint">等待模式下的排隊上限；超過就改為拒絕。</span>
+              </div>
+              <div class="rlr_field">
+                <span class="rlr_label">最大併發</span>
+                <input class="rlr_input" type="number" value="0" />
+                <span class="rlr_hint">0 = 不限制；大於 0 時以 FIFO 分配併發槽位。</span>
+              </div>
+            </div>
           </div>
-          <div class="rlr_field">
-            <span class="rlr_label">突發容量</span>
-            <input class="rlr_input" type="number" value="4" />
-            <span class="rlr_hint">閒置後可立即送出的最大請求數。</span>
-          </div>
-          <div class="rlr_field">
-            <span class="rlr_label">桶空時</span>
-            <select class="rlr_select">
-              <option>等待（排隊）</option>
-              <option>拒絕（429）</option>
-            </select>
+          <div class="rlr_group">
+            <div class="rlr_groupTitle">退避設定</div>
+            <div class="rlr_grid">
+              <div class="rlr_field">
+                <label class="rlr_check"><input type="checkbox" checked /> <span>上游 429 退避</span></label>
+                <span class="rlr_hint">收到 429 時冷卻該路由，連續失敗指數加倍。</span>
+              </div>
+              <div class="rlr_field">
+                <span class="rlr_label">退避基準（毫秒）</span>
+                <input class="rlr_input" type="number" value="30000" />
+                <span class="rlr_hint">沒有 Retry-After 時使用的初始冷卻時間。</span>
+              </div>
+              <div class="rlr_field">
+                <span class="rlr_label">退避上限（毫秒）</span>
+                <input class="rlr_input" type="number" value="60000" />
+                <span class="rlr_hint">指數退避的天花板。</span>
+              </div>
+              <div class="rlr_field">
+                <span class="rlr_label">退避抖動（0-1）</span>
+                <input class="rlr_input" type="number" value="0" />
+                <span class="rlr_hint">對退避時間加入對稱隨機抖動。</span>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -254,10 +298,11 @@ ${provider("OpenRouter", "openrouter", [])}
                   <tr>
                     <td><select class="rlr_select"><option>nvidia</option></select></td>
                     <td>
-                      <div class="rlr_pair">
-                        <input class="rlr_input" type="text" value="deepseek-v4.1-flash" />
-                        <select class="rlr_select rlr_pick"><option>▾ 選擇模型…</option><option>deepseek-v4.1-flash</option><option>glm-4.6</option></select>
-                      </div>
+                      <select class="rlr_select" data-col="model" title="選擇模型…">
+                        <option>（全部）</option>
+                        <option selected>deepseek-v4.1-flash</option>
+                        <option>glm-4.6</option>
+                      </select>
                     </td>
                     <td><input class="rlr_input" type="number" value="60" /></td>
                     <td><input class="rlr_input" type="number" value="2" /></td>
@@ -266,10 +311,12 @@ ${provider("OpenRouter", "openrouter", [])}
                   <tr>
                     <td><select class="rlr_select"><option>（全部）</option></select></td>
                     <td>
-                      <div class="rlr_pair">
-                        <input class="rlr_input" type="text" placeholder="（全部）" />
-                        <select class="rlr_select rlr_pick"><option>▾ 選擇模型…</option><option>deepseek-v4.1-flash</option><option>glm-4.6</option><option>llama-3.3-70b</option></select>
-                      </div>
+                      <select class="rlr_select" data-col="model" title="選擇模型…">
+                        <option selected>（全部）</option>
+                        <option>deepseek-v4.1-flash</option>
+                        <option>glm-4.6</option>
+                        <option>llama-3.3-70b</option>
+                      </select>
                     </td>
                     <td><input class="rlr_input" type="number" value="20" /></td>
                     <td><input class="rlr_input" type="number" value="4" /></td>

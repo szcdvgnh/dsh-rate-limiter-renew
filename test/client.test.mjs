@@ -296,6 +296,8 @@ test("client: interacting with the card keeps Save and the model list honest", a
   const surface = makeSurface(Component, t, detection);
   const providerSelect = () =>
     surface.nodes().find((n) => n.type === "select" && n.children.some((o) => o.props && o.props.value === "openrouter"));
+  /** The model cell is exactly one <select> (data-col="model"), no datalist/input. */
+  const modelSelects = () => surface.nodes().filter((n) => n.type === "select" && n.props["data-col"] === "model");
 
   // An unchanged draft has nothing to save.
   surface.mount(base);
@@ -306,40 +308,61 @@ test("client: interacting with the card keeps Save and the model list honest", a
   // Save disabled, because serializeDraft() drops rows without a provider.
   surface.mount(base);
   surface.act(surface.button(delivered.DICT.zh.addRow).props.onClick);
-  assert.equal(surface.nodes().filter((n) => n.type === "input" && n.props.list).length, 2);
+  assert.equal(modelSelects().length, 2);
   assert.equal(surface.save().props.disabled, false);
 
+  // The model cell must be exactly one control: no text input with a datalist
+  // and no second "▾ 選擇模型…" picker beside it.
+  surface.mount(base);
+  assert.equal(surface.nodes().filter((n) => n.type === "input" && n.props.list).length, 0);
+  assert.equal(modelSelects().length, 1);
+  assert.equal(surface.nodes().filter((n) => n.type === "datalist").length, 0);
+
   // Switching the row to another provider must drop the model that provider does
-  // not advertise: a native <datalist> filters by the text in the box, so the
-  // left-over model used to hide every suggestion and the model became unpickable.
+  // not advertise: the model select only offers the new provider's models, so a
+  // left-over value would render as an unmatched selection.
   surface.mount(base);
   surface.act(providerSelect().props.onChange, { target: { value: "openrouter" } });
-  const modelInput = surface.nodes().find((n) => n.type === "input" && n.props.list);
+  const modelSelect = modelSelects()[0];
   assert.equal(providerSelect().props.value, "openrouter");
-  assert.equal(modelInput.props.value, "");
-  const list = surface.nodes().find((n) => n.type === "datalist" && n.props.id === modelInput.props.list);
-  assert.deepEqual(list.children.map((o) => o.props.value), ["llama-3.3-70b"]);
+  assert.equal(modelSelect.props.value, "");
+  assert.deepEqual(modelSelect.children.map((o) => o.props.value), ["", "llama-3.3-70b"]);
 
-  // The dropdown must keep offering the provider's whole list even when the box
-  // already holds a model, otherwise picking a second one means clearing the
-  // field by hand first (the datalist collapses to the current value).
+  // The select keeps offering the provider's whole list after every pick, so the
+  // model stays re-selectable — the old datalist collapsed to the current value.
   surface.mount(base);
-  const modelPicker = () =>
-    surface.nodes().find(
-      (n) => n.type === "select" && typeof n.props.className === "string" && n.props.className.includes("rlr_pick")
-    );
-  const modelValue = () => surface.nodes().find((n) => n.type === "input" && n.props.list).props.value;
-  assert.deepEqual(modelPicker().children.map((o) => o.props.value), ["", "deepseek-v4.1-flash", "glm-4.6"]);
-  surface.act(modelPicker().props.onChange, { target: { value: "glm-4.6" } });
+  const modelValue = () => modelSelects()[0].props.value;
+  assert.deepEqual(
+    modelSelects()[0].children.map((o) => o.props.value),
+    ["", "deepseek-v4.1-flash", "glm-4.6"]
+  );
+  surface.act(modelSelects()[0].props.onChange, { target: { value: "glm-4.6" } });
   assert.equal(modelValue(), "glm-4.6");
-  assert.deepEqual(modelPicker().children.map((o) => o.props.value), ["", "deepseek-v4.1-flash", "glm-4.6"]);
-  surface.act(modelPicker().props.onChange, { target: { value: "deepseek-v4.1-flash" } });
+  assert.deepEqual(
+    modelSelects()[0].children.map((o) => o.props.value),
+    ["", "deepseek-v4.1-flash", "glm-4.6"]
+  );
+  surface.act(modelSelects()[0].props.onChange, { target: { value: "deepseek-v4.1-flash" } });
   assert.equal(modelValue(), "deepseek-v4.1-flash");
+  // …and back to "all models" without losing the list.
+  surface.act(modelSelects()[0].props.onChange, { target: { value: "" } });
+  assert.equal(modelValue(), "");
+  assert.equal(modelSelects()[0].children.length, 3);
 
   // A provider detection does not know must still be shown, not silently
-  // rendered as "（全部）" while the row actually saves that provider.
+  // rendered as "（全部）" while the row actually saves that provider — and its
+  // stored model must survive as a trailing option, not vanish from the select.
   surface.mount({ ...base, models: [{ provider: "zai", model: "glm-4.6", requestsPerMinute: 5, burst: 2 }] });
   assert.equal(providerSelect().props.value, "zai");
+  assert.deepEqual(modelSelects()[0].children.map((o) => o.props.value), ["", "glm-4.6"]);
+  assert.equal(modelSelects()[0].props.value, "glm-4.6");
+
+  // With no override rows the table is replaced by an empty state.
+  surface.mount({ ...base, models: [] });
+  assert.equal(modelSelects().length, 0);
+  const empty = surface.nodes().find((n) => n.props && n.props.className === "rlr_empty");
+  assert.ok(empty, "the empty override table must show an empty state");
+  assert.equal(textOf(empty), delivered.DICT.zh.rowsEmpty);
 
   // An emptied number box must block Save rather than silently serialize as 0.
   surface.mount(base);
